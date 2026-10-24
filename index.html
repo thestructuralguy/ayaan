@@ -633,8 +633,14 @@ function sideStud(x, y, z, mat){ var s = new THREE.Mesh(studGeo, mat); s.rotatio
 function nameTex(name, color, bg){
   var c = document.createElement('canvas'); c.width = 512; c.height = 160; var x = c.getContext('2d');
   x.fillStyle = bg || '#f3eee3'; x.fillRect(0, 0, 512, 160);
-  x.fillStyle = color; x.textAlign = 'center'; x.textBaseline = 'middle'; x.font = '700 ' + (name.length > 22 ? 40 : name.length > 15 ? 52 : name.length > 9 ? 70 : 88) + 'px Fredoka, Arial Rounded MT Bold, sans-serif';
-  x.fillText(name, 256, 84);
+  x.fillStyle = color; x.textAlign = 'center'; x.textBaseline = 'middle';
+  // one child per line (siblings stack); 3 or 4 children go two per line
+  var kids = String(name).split('&').map(function(n){ return n.trim(); }).filter(Boolean), lines = kids.length > 2 ? [kids.slice(0, 2).join(', '), kids.slice(2).join(', ')] : kids.length ? kids : [String(name)];
+  var maxH = lines.length > 1 ? 62 : 88, fam = 'px Fredoka, Arial Rounded MT Bold, sans-serif', size = maxH;
+  lines.forEach(function(l){ var f = maxH; x.font = '700 ' + f + fam; while(f > 24 && x.measureText(l).width > 470){ f -= 2; x.font = '700 ' + f + fam; } size = Math.min(size, f); });
+  x.font = '700 ' + size + fam;
+  var gap = size * 1.08, y0 = 82 - gap * (lines.length - 1) / 2;
+  lines.forEach(function(l, i){ x.fillText(l, 256, y0 + i * gap); });
   var t = new THREE.CanvasTexture(c); t.encoding = THREE.sRGBEncoding; t.anisotropy = 8; return t;
 }
 var SKIN = [0xf3cfac, 0xe2ac80, 0xc68b5c, 0x9a6440, 0x6c4428], HAIR = [0x2a1c13, 0x4f321b, 0x7d5128, 0xc8963a, 0x161616, 0x3b2a20], SHIRT = [0xef7a1a, 0x7a4fc9, 0x2f9a3f, 0x1769d6, 0xd7262f, 0xf3b81d, 0xe2558f, 0x14a3a3];
@@ -1012,7 +1018,8 @@ function detailRows(target){
   if(PARTY.rsvpBy) target.appendChild(row('day', 'RSVP by', PARTY.rsvpBy, 'var(--blue)'));
 }
 detailRows($('ticketRows'));
-function setOnboard(){ var box = $('onboard'); box.textContent = ''; var n = passengers.length, line = el('span'); line.appendChild(el('b', null, n + (n === 1 ? ' kid' : ' kids'))); line.appendChild(document.createTextNode(' on board so far')); box.appendChild(line); if(!LIVE) box.appendChild(el('span', 'tag', 'Preview with example names')); }
+function kidCount(list){ return list.reduce(function(sum, f){ return sum + String(f).split('&').filter(function(n){ return n.trim(); }).length; }, 0); }
+function setOnboard(){ var box = $('onboard'); box.textContent = ''; var n = kidCount(passengers), line = el('span'); line.appendChild(el('b', null, n + (n === 1 ? ' kid' : ' kids'))); line.appendChild(document.createTextNode(' on board so far')); box.appendChild(line); if(!LIVE) box.appendChild(el('span', 'tag', 'Preview with example names')); }
 function calendarUrl(){
   var f = function(x){ return x.replace(/[-:]/g, '').slice(0, 13) + '00'; };
   var where = PARTY.venue + ', ' + PARTY.address, maps = 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(where);
@@ -1103,10 +1110,10 @@ async function board(){
   S.moving = true; labelsOn = true;
   await tween(3400, function(p){ S.s = s0 - 70 * (1 - p); }, easeOut);
   S.moving = false; whistle(2); cheer();
-  var others = passengers.filter(function(n){ return !myName || n.toLowerCase() !== myName.toLowerCase(); }).length;
+  var others = kidCount(passengers.filter(function(n){ return !myName || n.toLowerCase() !== myName.toLowerCase(); })), allKids = kidCount(passengers);
   var txt = $('calloutText'); txt.textContent = '';
   txt.appendChild(el('b', null, myName ? 'Choo choo, ' + joinNames(kidsOf(me)) + '!' : 'Choo choo!'));
-  txt.appendChild(document.createTextNode(myName ? "You're in the yellow wagon, right behind " + PARTY.child + '.' + (others ? ' ' + others + (others === 1 ? ' friend is' : ' friends are') + ' riding too.' : '') : passengers.length + (passengers.length === 1 ? ' kid is' : ' kids are') + ' riding to the party.'));
+  txt.appendChild(document.createTextNode(myName ? "You're in the yellow wagon, right behind " + PARTY.child + '.' + (others ? ' ' + others + (others === 1 ? ' friend is' : ' friends are') + ' riding too.' : '') : allKids + (allKids === 1 ? ' kid is' : ' kids are') + ' riding to the party.'));
   $('callout').hidden = false;
   panning = true; await sleep(400);
   if(panning){ var o0 = S.orbit; await tween(5000, function(p){ if(panning){ S.orbit = o0 + p * 1.2; S.zoom = 1.25 - .25 * Math.sin(p * Math.PI); } }); }
