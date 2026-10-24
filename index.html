@@ -886,16 +886,88 @@ function tween(dur, fn, ease){ ease = ease || easeInOut; if(reduce) dur = Math.m
 function sleep(ms){ return new Promise(function(r){ setTimeout(r, reduce ? 0 : ms); }); }
 
 /* ---------- sound ---------- */
-var soundOn = store('ayaanExpress.sound') !== false, actx = null;
+var soundOn = store('ayaanExpress.sound') !== false, actx = null, master = null, musicBus = null, trainBus = null, noiseBuf = null, brownBuf = null;
 function setSoundLabel(){ $('sound').innerHTML = "<svg width='20' height='20' viewBox='0 0 18 18' aria-hidden='true'><path d='M2 7h3l4-3v10l-4-3H2z' fill='currentColor'/>" + (soundOn ? "<path d='M12 6c1.2 1.6 1.2 4.4 0 6M14.5 4c2.2 2.8 2.2 7.2 0 10' stroke='currentColor' stroke-width='1.8' fill='none'/>" : "<path d='M11.5 6.5l5 5M16.5 6.5l-5 5' stroke='currentColor' stroke-width='1.8'/>") + '</svg>'; $('sound').setAttribute('aria-label', soundOn ? 'Sound on' : 'Sound off'); $('sound').setAttribute('aria-pressed', soundOn); }
 setSoundLabel();
-$('sound').onclick = function(){ soundOn = !soundOn; store('ayaanExpress.sound', soundOn); setSoundLabel(); if(soundOn){ unlockAudio(); whistle(1); } };
-function unlockAudio(){ try{ actx = actx || new (window.AudioContext || window.webkitAudioContext)(); if(actx.state === 'suspended') actx.resume(); }catch(e){} }
+function setMasterLevel(){ if(!master) return; var t = actx.currentTime; master.gain.cancelScheduledValues(t); master.gain.setValueAtTime(master.gain.value, t); master.gain.linearRampToValueAtTime(soundOn ? 1 : 0, t + .25); }
+$('sound').onclick = function(){ soundOn = !soundOn; store('ayaanExpress.sound', soundOn); setSoundLabel(); unlockAudio(); setMasterLevel(); if(soundOn){ startMusic(); whistle(1); } };
+function unlockAudio(){
+  try{
+    if(!actx){
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+      master = actx.createGain(); master.gain.value = soundOn ? 1 : 0;
+      var comp = actx.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 3;
+      master.connect(comp); comp.connect(actx.destination);
+      musicBus = actx.createGain(); musicBus.gain.value = .55; musicBus.connect(master);
+      trainBus = actx.createGain(); trainBus.gain.value = .9; trainBus.connect(master);
+      var n = actx.sampleRate * 2, b = actx.createBuffer(1, n, actx.sampleRate), d = b.getChannelData(0), i; for(i=0;i<n;i++) d[i] = Math.random() * 2 - 1; noiseBuf = b;
+      var bb = actx.createBuffer(1, n, actx.sampleRate), bd = bb.getChannelData(0), last = 0; for(i=0;i<n;i++){ last = (last + .02 * (Math.random() * 2 - 1)) / 1.02; bd[i] = last * 3.5; } brownBuf = bb;
+      startRumble();
+    }
+    if(actx.state === 'suspended') actx.resume();
+  }catch(e){}
+}
 function whistle(toots){
   if(!soundOn || !actx) return; var t0 = actx.currentTime + .05;
   for(var k=0;k<toots;k++){ var s = t0 + k * .5, len = k === toots - 1 ? .6 : .3;
-    [587, 740, 880].forEach(function(f){ var o = actx.createOscillator(), g = actx.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(f * .96, s); o.frequency.linearRampToValueAtTime(f, s + .08); g.gain.setValueAtTime(0, s); g.gain.linearRampToValueAtTime(.05, s + .05); g.gain.setValueAtTime(.05, s + len - .1); g.gain.linearRampToValueAtTime(0, s + len); o.connect(g); g.connect(actx.destination); o.start(s); o.stop(s + len + .05); }); }
+    [587, 740, 880].forEach(function(f){ var o = actx.createOscillator(), g = actx.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(f * .96, s); o.frequency.linearRampToValueAtTime(f, s + .08); g.gain.setValueAtTime(0, s); g.gain.linearRampToValueAtTime(.05, s + .05); g.gain.setValueAtTime(.05, s + len - .1); g.gain.linearRampToValueAtTime(0, s + len); o.connect(g); g.connect(master); o.start(s); o.stop(s + len + .05); }); }
 }
+// pause audio when the page is hidden (phone locked, app switched)
+document.addEventListener('visibilitychange', function(){ if(!actx) return; if(document.hidden) actx.suspend(); else actx.resume(); });
+// start music on the first tap or key press anywhere
+(function(){ var go = function(){ unlockAudio(); startMusic(); ['pointerdown', 'keydown', 'touchstart'].forEach(function(ev){ window.removeEventListener(ev, go, true); }); }; ['pointerdown', 'keydown', 'touchstart'].forEach(function(ev){ window.addEventListener(ev, go, true); }); })();
+
+/* ---------- music: an original, cheerful toy-box tune ---------- */
+var MEL = [
+  [67,72,76,72,79,-1,76,-1], [74,71,74,79,77,-1,74,-1], [72,76,81,-1,79,76,72,-1], [77,76,74,72,74,-1,-1,0],
+  [67,72,76,72,79,-1,76,-1], [79,81,79,77,76,-1,74,-1], [72,74,76,77,76,74,72,-1], [74,-1,71,-1,74,-1,0,0],
+  [76,-1,72,76,81,-1,79,-1], [77,-1,72,77,81,-1,77,-1], [79,76,79,84,83,-1,79,-1], [81,79,77,76,74,-1,-1,0],
+  [76,77,79,81,79,76,72,-1], [77,79,81,77,76,-1,72,-1], [74,76,77,79,74,-1,71,-1], [72,-1,76,-1,72,-1,0,0]
+];
+var CHORDS = [[48,52,55],[43,47,50],[45,48,52],[41,45,48],[48,52,55],[43,47,50],[41,45,48],[43,47,50],[45,48,52],[41,45,48],[48,52,55],[43,47,50],[45,48,52],[41,45,48],[43,47,50],[48,52,55]];
+var EIGHTH = 60 / 116 / 2, mStep = 0, mNext = 0, mTimer = null;
+function mtof(m){ return 440 * Math.pow(2, (m - 69) / 12); }
+function noteLen(bar, i){ var n = 1; while(i + n < 8 && MEL[bar][i + n] === -1) n++; return n; }
+function tone(freq, t, dur, type, peak, dest, attack){ var o = actx.createOscillator(), g = actx.createGain(); o.type = type; o.frequency.setValueAtTime(freq, t); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + (attack || .006)); g.gain.exponentialRampToValueAtTime(.0008, t + dur); o.connect(g); g.connect(dest); o.start(t); o.stop(t + dur + .05); }
+function tick(t, freq, dur, peak){ var src = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain(); src.buffer = noiseBuf; f.type = 'highpass'; f.frequency.value = freq; g.gain.setValueAtTime(peak, t); g.gain.exponentialRampToValueAtTime(.0008, t + dur); src.connect(f); f.connect(g); g.connect(musicBus); src.start(t, Math.random() * 1.5, dur + .02); }
+function scheduleStep(step, t){
+  var bar = Math.floor(step / 8) % 16, i = step % 8, m = MEL[bar][i], ch = CHORDS[bar];
+  if(m > 0){ var len = noteLen(bar, i) * EIGHTH; tone(mtof(m), t, Math.max(.35, len * 1.4), 'triangle', .13, musicBus); tone(mtof(m + 12), t, .25, 'sine', .035, musicBus); }
+  if(i === 0 || i === 4){ tone(mtof(ch[0] - 12), t, EIGHTH * 3, 'sine', .22, musicBus, .01); tone(mtof(ch[0]), t, EIGHTH * 2, 'triangle', .05, musicBus, .01); }
+  if(i === 2 || i === 6){ tone(mtof(ch[0] - 5), t, EIGHTH * 1.6, 'sine', .14, musicBus, .01); }
+  if(i % 2 === 1){ ch.forEach(function(c, k){ tone(mtof(c + 12), t + k * .012, .22, 'triangle', .028, musicBus); }); tick(t, 7000, .035, .05); }
+  if(i === 0 || i === 4){ var o = actx.createOscillator(), g = actx.createGain(); o.frequency.setValueAtTime(130, t); o.frequency.exponentialRampToValueAtTime(48, t + .14); g.gain.setValueAtTime(.18, t); g.gain.exponentialRampToValueAtTime(.001, t + .16); o.connect(g); g.connect(musicBus); o.start(t); o.stop(t + .2); }
+  if(i === 2 || i === 6) tick(t, 2500, .08, .05);
+}
+function startMusic(){
+  if(!actx || mTimer) return;
+  mNext = actx.currentTime + .15; mStep = 0;
+  musicBus.gain.setValueAtTime(0, actx.currentTime); musicBus.gain.linearRampToValueAtTime(.55, actx.currentTime + 2.5);
+  mTimer = setInterval(function(){ if(!actx || actx.state !== 'running') return; while(mNext < actx.currentTime + .3){ scheduleStep(mStep, mNext); mStep++; mNext += EIGHTH; } if(mNext < actx.currentTime) mNext = actx.currentTime + .05; }, 60);
+}
+// music dips a little while the train is moving so the chug is heard
+function setMusicDuck(on){ if(!musicBus) return; var t = actx.currentTime; musicBus.gain.cancelScheduledValues(t); musicBus.gain.setValueAtTime(musicBus.gain.value, t); musicBus.gain.linearRampToValueAtTime(on ? .38 : .55, t + .8); }
+
+/* ---------- train sounds: chug, rail clack, rumble, brake hiss ---------- */
+var rumbleGain = null, lastS = null, lastT = 0, chugD = 0, clackD = 0, chugN = 0, vSmooth = 0, wasMoving = false;
+function startRumble(){ var src = actx.createBufferSource(), f = actx.createBiquadFilter(); rumbleGain = actx.createGain(); src.buffer = brownBuf; src.loop = true; f.type = 'lowpass'; f.frequency.value = 220; rumbleGain.gain.value = 0; src.connect(f); f.connect(rumbleGain); rumbleGain.connect(trainBus); src.start(); }
+function noiseHit(t, type, freq, q, peak, dur){ var src = actx.createBufferSource(), f = actx.createBiquadFilter(), g = actx.createGain(); src.buffer = noiseBuf; f.type = type; f.frequency.value = freq; f.Q.value = q; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + .008); g.gain.exponentialRampToValueAtTime(.0008, t + dur); src.connect(f); f.connect(g); g.connect(trainBus); src.start(t, Math.random() * 1.5, dur + .05); }
+function chug(vol){ var t = actx.currentTime + .01, acc = chugN++ % 4 === 0; noiseHit(t, 'bandpass', acc ? 520 : 760, .9, (acc ? .55 : .36) * vol, acc ? .2 : .14); noiseHit(t, 'lowpass', 160, .7, .25 * vol, .12); }
+function clack(vol){ var t = actx.currentTime + .01; [0, .085].forEach(function(dt){ noiseHit(t + dt, 'bandpass', 3200, 2.5, .22 * vol, .035); var o = actx.createOscillator(), g = actx.createGain(); o.frequency.value = 180; g.gain.setValueAtTime(.12 * vol, t + dt); g.gain.exponentialRampToValueAtTime(.001, t + dt + .05); o.connect(g); g.connect(trainBus); o.start(t + dt); o.stop(t + dt + .07); }); }
+function hiss(){ var t = actx.currentTime + .02; noiseHit(t, 'highpass', 2800, .7, .2, 1.1); }
+function trainAudio(now){
+  if(!actx || !rumbleGain){ lastS = S.s; lastT = now; return; }
+  var dt = Math.min(.1, Math.max(.001, (now - lastT) / 1000)); lastT = now;
+  var ds = lastS == null ? 0 : S.s - lastS; lastS = S.s;
+  if(ds < -L / 2) ds += L; if(Math.abs(ds) > 8) ds = 0;
+  var v = Math.abs(ds) / dt; vSmooth += (v - vSmooth) * Math.min(1, dt * 6);
+  var frac = Math.min(1, vSmooth / 18), moving = vSmooth > 1.2;
+  rumbleGain.gain.setTargetAtTime(moving ? .1 + .22 * frac : 0, actx.currentTime, .15);
+  if(moving){ var vol = .45 + .55 * frac; chugD += Math.abs(ds); clackD += Math.abs(ds); if(chugD >= 4.5){ chugD -= 4.5; chug(vol); } if(clackD >= 7){ clackD -= 7; clack(vol); } }
+  if(wasMoving && !moving){ hiss(); setMusicDuck(false); } if(!wasMoving && moving) setMusicDuck(true);
+  wasMoving = moving;
+}
+(function audioLoop(now){ try{ trainAudio(now || 0); }catch(e){} requestAnimationFrame(audioLoop); })();
 
 /* ---------- backend ---------- */
 function gas(fn, arg){
